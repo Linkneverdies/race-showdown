@@ -7,4 +7,5 @@
 # Python cache
 __pycache__/
 *.py[cod]
-*$py.class
+*$py.classgit rm -r --cached .idea
+.idea/
