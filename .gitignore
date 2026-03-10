@@ -1,6 +1,10 @@
 .venv
 .idea
-/notes.*
 /notes/notes.aux
 /notes/notes.log
 /notes/figures/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
