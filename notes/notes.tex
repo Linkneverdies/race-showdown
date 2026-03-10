@@ -1,0 +1,237 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{mathtools}
+
+\title{RaceShowdown Model Notes}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Problem Setup}
+
+In this project, a race is determined by two inputs:
+\begin{itemize}
+    \item $n \geq 0$: the number of hot dogs both athletes eat,
+    \item $d \geq 0$: the running distance in meters after eating.
+\end{itemize}
+
+The two athletes are Chestnut and Bolt.
+The goal is to determine, for each pair $(d,n)$, which athlete is favored to win.
+
+\medskip
+
+There are two versions of the model in the codebase:
+\begin{itemize}
+    \item a \textbf{deterministic model}, which compares mean total race times,
+    \item a \textbf{probabilistic model}, which adds randomness and estimates win probabilities.
+\end{itemize}
+
+\section*{Deterministic Model}
+
+For athlete $i$, define the following parameters:
+\begin{itemize}
+    \item $v_i > 0$: baseline running speed,
+    \item $k_i \geq 0$: running fatigue coefficient,
+    \item $a_i > 0$: baseline time for a hot dog,
+    \item $b_i \geq 0$: extra eating time per hot dog,
+    \item $c_i \geq 0$: linear post-eating running penalty,
+    \item $q_i \geq 0$: quadratic post-eating running penalty.
+\end{itemize}
+
+\subsection*{Eating Time}
+
+If athlete $i$ eats $n$ hot dogs, then the deterministic eating time is
+\[
+E_i(n)=\sum_{m=1}^{n}(a_i+b_i m).
+\]
+
+This can be simplified to
+\[
+E_i(n)=n a_i + b_i \frac{n(n+1)}{2}.
+\]
+
+In the code, this corresponds to the cumulative eating-time calculation.
+
+\subsection*{Post-Eating Running Penalty}
+
+After eating $n$ hot dogs, athlete $i$ runs with a multiplicative penalty
+\[
+M_i(n)=1+c_i n+q_i n^2.
+\]
+
+This term captures the idea that running gets harder after eating more hot dogs.
+
+\subsection*{Running Time}
+
+Before accounting for eating, the baseline running time over distance $d$ is
+\[
+R_i^{\text{base}}(d)=\frac{d}{v_i}(1+k_i d).
+\]
+
+The factor $(1+k_i d)$ models fatigue with distance.
+
+After including the post-eating penalty, the deterministic running time becomes
+\[
+R_i(d,n)=R_i^{\text{base}}(d)\,M_i(n)
+=\frac{d}{v_i}(1+k_i d)(1+c_i n+q_i n^2).
+\]
+
+\subsection*{Total Deterministic Time}
+
+The deterministic total race time for athlete $i$ is
+\[
+T_i(d,n)=E_i(n)+R_i(d,n).
+\]
+
+For this project, the deterministic comparison is based on the difference
+\[
+\Delta(d,n)=T_C(d,n)-T_B(d,n),
+\]
+where $C$ denotes Chestnut and $B$ denotes Bolt.
+
+The sign of $\Delta(d,n)$ determines the winner:
+\begin{itemize}
+    \item $\Delta(d,n)<0$: Chestnut is faster,
+    \item $\Delta(d,n)>0$: Bolt is faster,
+    \item $\Delta(d,n)=0$: deterministic tie.
+\end{itemize}
+
+\subsection*{Expanded Deterministic Formula}
+
+Expanding the total-time difference gives
+\[
+\Delta(d,n)=\bigl(E_C(n)-E_B(n)\bigr)
++ d\left(\frac{M_C(n)}{v_C}-\frac{M_B(n)}{v_B}\right)
++ d^2\left(\frac{k_C M_C(n)}{v_C}-\frac{k_B M_B(n)}{v_B}\right).
+\]
+
+This equation is useful because it separates the race into three effects:
+\begin{enumerate}
+    \item \textbf{Eating advantage:}
+    \[
+    E_C(n)-E_B(n).
+    \]
+    This measures who is faster at eating $n$ hot dogs.
+
+    \item \textbf{Linear running effect in distance:}
+    \[
+    d\left(\frac{M_C(n)}{v_C}-\frac{M_B(n)}{v_B}\right).
+    \]
+    This captures how the baseline running-speed difference interacts with the post-eating penalty.
+
+    \item \textbf{Quadratic fatigue effect in distance:}
+    \[
+    d^2\left(\frac{k_C M_C(n)}{v_C}-\frac{k_B M_B(n)}{v_B}\right).
+    \]
+    This captures the extra long-distance fatigue effect, which becomes more important at large $d$.
+\end{enumerate}
+
+This decomposition explains why the winner can change across the $(d,n)$ plane. One athlete may have an advantage in eating, while the other may recover that advantage through running speed or long-distance fatigue behavior.
+
+\section*{Probabilistic Model}
+
+The probabilistic model keeps the same overall structure, but now total race time is random rather than fixed. In the code, randomness is introduced through:
+\begin{itemize}
+    \item eating-time noise,
+    \item running-speed noise,
+    \item fatigue noise,
+    \item post-eating penalty noise.
+\end{itemize}
+
+So instead of deterministic total times $T_C(d,n)$ and $T_B(d,n)$, we consider random total times, which by abuse of notation we still write as $T_C(d,n)$ and $T_B(d,n)$.
+
+The main object of interest is
+\[
+p(d,n)=\Pr\bigl(T_C(d,n)<T_B(d,n)\bigr).
+\]
+
+This is the probability that Chestnut beats Bolt at the point $(d,n)$.
+
+\subsection*{Interpretation of $p(d,n)$}
+
+\begin{itemize}
+    \item If $p(d,n)>0.5$, then Chestnut is more likely to win.
+    \item If $p(d,n)<0.5$, then Bolt is more likely to win.
+    \item If $p(d,n)=0.5$, then both athletes are equally likely to win.
+\end{itemize}
+
+In the code, this probability is estimated by Monte Carlo simulation:
+\begin{itemize}
+    \item sample many race times for Chestnut,
+    \item sample many race times for Bolt,
+    \item count the fraction of samples in which Chestnut's time is smaller.
+\end{itemize}
+
+\section*{What the Two Boundaries Mean}
+
+There are two different boundaries in the project:
+
+\subsection*{Deterministic Boundary}
+
+The deterministic boundary is defined by
+\[
+\Delta(d,n)=0.
+\]
+
+This is the set of points where the athletes have the same \emph{mean-model} race time.
+
+\subsection*{Probabilistic Boundary}
+
+The probabilistic boundary is defined by
+\[
+p(d,n)=0.5.
+\]
+
+This is the set of points where the athletes are equally likely to win once randomness is included.
+
+\medskip
+
+These boundaries do not have to coincide. Two athletes can have the same mean time but different variances, or one athlete can have a slightly worse mean but still win often because of the shape of the distribution.
+
+\section*{Why Non-Monotonic Behavior Can Appear}
+
+It is tempting to expect that if the number of hot dogs is fixed, then increasing the distance should move the outcome in only one direction. However, the deterministic difference
+\[
+\Delta(d,n)=A(n)+B(n)d+C(n)d^2
+\]
+is generally a quadratic function of $d$, where
+\[
+A(n)=E_C(n)-E_B(n),
+\]
+\[
+B(n)=\frac{M_C(n)}{v_C}-\frac{M_B(n)}{v_B},
+\]
+\[
+C(n)=\frac{k_C M_C(n)}{v_C}-\frac{k_B M_B(n)}{v_B}.
+\]
+
+Since a quadratic need not be monotone, the deterministic tie boundary is not guaranteed to be monotone either.
+
+The same is true, a fortiori, for the probabilistic boundary, because it depends on full random race-time distributions rather than only on mean values.
+
+\section*{Summary}
+
+The project studies a two-parameter race model in the variables $(d,n)$:
+\begin{itemize}
+    \item the deterministic model compares mean total times through $\Delta(d,n)$,
+    \item the probabilistic model compares win likelihood through $p(d,n)$.
+\end{itemize}
+
+The deterministic formula
+\[
+\Delta(d,n)=\bigl(E_C(n)-E_B(n)\bigr)
++ d\left(\frac{M_C(n)}{v_C}-\frac{M_B(n)}{v_B}\right)
++ d^2\left(\frac{k_C M_C(n)}{v_C}-\frac{k_B M_B(n)}{v_B}\right)
+\]
+shows how eating, running speed, and fatigue interact.
+
+The probabilistic quantity
+\[
+p(d,n)=\Pr\bigl(T_C(d,n)<T_B(d,n)\bigr)
+\]
+is the stochastic analogue: it measures how often Chestnut wins once randomness is added to the race.
+
+\end{document}
