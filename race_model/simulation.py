@@ -1,10 +1,12 @@
 import numpy as np
 
-from models import (
+from race_model.models import (
     Athlete,
     mean_cumulative_eat_time,
     mean_post_eating_multiplier,
     mean_total_time,
+    riegel_running_time,
+    two_regime_running_time,
 )
 
 
@@ -20,14 +22,15 @@ def sample_total_times(
 
     Randomness sources:
     - eating time noise
-    - running speed noise
-    - running fatigue noise
+    - sprint-reference-time noise
+    - reference-time noise
+    - endurance-exponent noise
     - post-eating penalty noise
     """
     if n_hotdogs < 0:
         raise ValueError("n_hotdogs must be non-negative")
-    if distance_m < 0:
-        raise ValueError("distance_m must be non-negative")
+    if distance_m <= 0:
+        raise ValueError("distance_m must be positive")
     if n_samples <= 0:
         raise ValueError("n_samples must be positive")
 
@@ -39,12 +42,28 @@ def sample_total_times(
     eat_time = np.maximum(eat_time, 0.0)
 
     # Positive multiplicative perturbations
-    speed_mult = np.maximum(
-        rng.normal(loc=1.0, scale=athlete.run_speed_rel_std, size=n_samples),
+    reference_time_mult = np.maximum(
+        rng.normal(
+            loc=1.0,
+            scale=athlete.run_reference_time_rel_std,
+            size=n_samples,
+        ),
         0.2,
     )
-    fatigue_mult = np.maximum(
-        rng.normal(loc=1.0, scale=athlete.run_fatigue_rel_std, size=n_samples),
+    sprint_reference_time_mult = np.maximum(
+        rng.normal(
+            loc=1.0,
+            scale=athlete.run_sprint_reference_time_rel_std,
+            size=n_samples,
+        ),
+        0.2,
+    )
+    endurance_mult = np.maximum(
+        rng.normal(
+            loc=1.0,
+            scale=athlete.run_endurance_rel_std,
+            size=n_samples,
+        ),
         0.1,
     )
     post_mult_noise = np.maximum(
@@ -52,11 +71,31 @@ def sample_total_times(
         0.1,
     )
 
-    speed = athlete.base_speed_mps * speed_mult
-    fatigue = athlete.run_fatigue_coef * fatigue_mult
+    sprint_reference_time = athlete.run_sprint_reference_time_sec * sprint_reference_time_mult
+    reference_time = athlete.run_reference_time_sec * reference_time_mult
+    endurance = athlete.run_endurance_exponent * endurance_mult
     post_eat = mean_post_eating_multiplier(n_hotdogs, athlete) * post_mult_noise
 
-    run_time = (distance_m / speed) * (1.0 + fatigue * distance_m) * post_eat
+    threshold_time = riegel_running_time(
+        distance_m=athlete.run_sprint_threshold_distance_m,
+        reference_distance_m=athlete.run_reference_distance_m,
+        reference_time_sec=reference_time,
+        endurance_exponent=endurance,
+    )
+    # Keep noisy sprint samples physically consistent: the short reference time
+    # must remain faster than the modeled time at the sprint/endurance threshold.
+    sprint_reference_time = np.minimum(sprint_reference_time, threshold_time * 0.98)
+
+    run_time = two_regime_running_time(
+        distance_m=distance_m,
+        sprint_threshold_distance_m=athlete.run_sprint_threshold_distance_m,
+        sprint_reference_distance_m=athlete.run_sprint_reference_distance_m,
+        sprint_reference_time_sec=sprint_reference_time,
+        reference_distance_m=athlete.run_reference_distance_m,
+        reference_time_sec=reference_time,
+        endurance_exponent=endurance,
+        max_modeled_distance_m=athlete.run_max_modeled_distance_m,
+    ) * post_eat
     run_time = np.maximum(run_time, 0.0)
 
     return eat_time + run_time
@@ -163,13 +202,21 @@ def find_deterministic_tie_distance(
     n_hotdogs: int,
     athlete_a: Athlete,
     athlete_b: Athlete,
+    min_distance_m: float,
     max_distance_m: float,
     resolution_m: float = 1.0,
 ) -> float | None:
     """
     Find the first distance where the deterministic mean model ties.
     """
-    distances = np.arange(0.0, max_distance_m + resolution_m, resolution_m)
+    if min_distance_m <= 0:
+        raise ValueError("min_distance_m must be positive")
+    if max_distance_m < min_distance_m:
+        raise ValueError("max_distance_m must be >= min_distance_m")
+    if resolution_m <= 0:
+        raise ValueError("resolution_m must be positive")
+
+    distances = np.arange(min_distance_m, max_distance_m + resolution_m, resolution_m)
     values = np.array([
         mean_total_time(float(d), n_hotdogs, athlete_a)
         - mean_total_time(float(d), n_hotdogs, athlete_b)
@@ -199,6 +246,7 @@ def compute_deterministic_tie_curve(
     hotdog_counts: np.ndarray,
     athlete_a: Athlete,
     athlete_b: Athlete,
+    min_distance_m: float,
     max_distance_m: float,
     resolution_m: float = 1.0,
 ) -> list[float | None]:
@@ -210,6 +258,7 @@ def compute_deterministic_tie_curve(
             n_hotdogs=int(n),
             athlete_a=athlete_a,
             athlete_b=athlete_b,
+            min_distance_m=min_distance_m,
             max_distance_m=max_distance_m,
             resolution_m=resolution_m,
         )

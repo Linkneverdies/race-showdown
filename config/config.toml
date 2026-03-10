@@ -1,0 +1,80 @@
+# All distances are in meters. All times are in seconds.
+
+[simulation]
+athlete_a = "Chestnut"
+athlete_b = "Bolt"
+min_distance_m = 100.0
+max_distance_m = 5000.0
+distance_samples = 120
+max_hotdogs = 20
+monte_carlo_samples = 10000
+random_seed = 7
+
+[[simulation.reference_checks]]
+n_hotdogs = 0
+distance_m = 100.0
+
+[[simulation.reference_checks]]
+n_hotdogs = 1
+distance_m = 400.0
+
+[[simulation.reference_checks]]
+n_hotdogs = 5
+distance_m = 1500.0
+
+[[simulation.reference_checks]]
+n_hotdogs = 10
+distance_m = 3000.0
+
+[[simulation.reference_checks]]
+n_hotdogs = 20
+distance_m = 5000.0
+
+[running_model]
+sprint_threshold_distance = 400.0
+sprint_reference_distance = 100.0
+reference_distance = 1500.0
+max_modeled_distance = 5000.0
+
+[running_model.runner_types.elite]
+k = 1.05
+
+[running_model.runner_types.high]
+k = 1.06
+
+[running_model.runner_types.average]
+k = 1.07
+
+[running_model.runner_types.low]
+k = 1.09
+
+[running_model.runner_types.bad]
+k = 1.11
+
+[running_model.runners.Chestnut]
+sprint_ref_time = 15.6
+ref_time = 390.0
+type = "average"
+eat_base_sec = 3.0
+eat_slowdown_sec = 0.15
+post_eat_linear = 0.010
+post_eat_quadratic = 0.00035
+eat_noise_sec = 0.20
+run_sprint_ref_time_rel_std = 0.03
+run_ref_time_rel_std = 0.03
+run_endurance_rel_std = 0.10
+post_eat_rel_std = 0.08
+
+[running_model.runners.Bolt]
+sprint_ref_time = 9.7
+ref_time = 245.0
+type = "high"
+eat_base_sec = 9.0
+eat_slowdown_sec = 0.25
+post_eat_linear = 0.025
+post_eat_quadratic = 0.0012
+eat_noise_sec = 0.35
+run_sprint_ref_time_rel_std = 0.015
+run_ref_time_rel_std = 0.02
+run_endurance_rel_std = 0.08
+post_eat_rel_std = 0.12

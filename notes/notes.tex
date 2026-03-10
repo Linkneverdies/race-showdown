@@ -2,236 +2,326 @@
 \usepackage[a4paper,margin=1in]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{mathtools}
+\usepackage{graphicx}
 
-\title{RaceShowdown Model Notes}
+\title{RaceShowdown Project Notes}
 \author{}
 \date{}
 
 \begin{document}
 \maketitle
 
-\section*{Problem Setup}
+\section*{Project Overview}
 
-In this project, a race is determined by two inputs:
+RaceShowdown compares two athletes in a toy race-eating scenario:
 \begin{itemize}
-    \item $n \geq 0$: the number of hot dogs both athletes eat,
-    \item $d \geq 0$: the running distance in meters after eating.
+    \item both athletes first eat the same number of hot dogs,
+    \item both athletes then run the same distance,
+    \item the faster total time wins.
 \end{itemize}
 
-The two athletes are Chestnut and Bolt.
-The goal is to determine, for each pair $(d,n)$, which athlete is favored to win.
-
-\medskip
-
-There are two versions of the model in the codebase:
+The codebase evaluates this matchup in two ways:
 \begin{itemize}
-    \item a \textbf{deterministic model}, which compares mean total race times,
-    \item a \textbf{probabilistic model}, which adds randomness and estimates win probabilities.
+    \item a \textbf{deterministic model}, which compares mean total times,
+    \item a \textbf{probabilistic model}, which adds noise and estimates win probabilities by Monte Carlo simulation.
 \end{itemize}
 
-\section*{Deterministic Model}
-
-For athlete $i$, define the following parameters:
+The main entry point loads the TOML configuration, builds a distance-hot-dog grid, and produces:
 \begin{itemize}
-    \item $v_i > 0$: baseline running speed,
-    \item $k_i \geq 0$: running fatigue coefficient,
-    \item $a_i > 0$: baseline time for a hot dog,
-    \item $b_i \geq 0$: extra eating time per hot dog,
-    \item $c_i \geq 0$: linear post-eating running penalty,
-    \item $q_i \geq 0$: quadratic post-eating running penalty.
+    \item a probabilistic phase diagram, showing $P(\text{athlete A wins})$,
+    \item a deterministic phase diagram, showing which athlete has the lower mean time,
+    \item printed reference probabilities at a few named scenarios from the config file.
 \end{itemize}
+
+\section*{Current Mathematical Model}
+
+\subsection*{Inputs}
+
+For a race we specify:
+\begin{itemize}
+    \item $n \geq 0$: number of hot dogs eaten,
+    \item $d > 0$: running distance in meters.
+\end{itemize}
+
+All distances are in meters and all times are in seconds.
 
 \subsection*{Eating Time}
 
-If athlete $i$ eats $n$ hot dogs, then the deterministic eating time is
+For athlete $i$, the time to eat the $m$-th hot dog is modeled as
 \[
-E_i(n)=\sum_{m=1}^{n}(a_i+b_i m).
+e_i(m) = a_i + b_i m,
 \]
+where:
+\begin{itemize}
+    \item $a_i$ is the base eating time,
+    \item $b_i$ is the per-hot-dog slowdown.
+\end{itemize}
 
-This can be simplified to
+The cumulative mean time to eat $n$ hot dogs is
 \[
-E_i(n)=n a_i + b_i \frac{n(n+1)}{2}.
+E_i(n) = \sum_{m=1}^{n} (a_i + b_i m).
 \]
-
-In the code, this corresponds to the cumulative eating-time calculation.
 
 \subsection*{Post-Eating Running Penalty}
 
-After eating $n$ hot dogs, athlete $i$ runs with a multiplicative penalty
+After eating $n$ hot dogs, the running component is multiplied by
 \[
-M_i(n)=1+c_i n+q_i n^2.
+M_i(n) = 1 + c_i n + q_i n^2,
 \]
-
-This term captures the idea that running gets harder after eating more hot dogs.
-
-\subsection*{Running Time}
-
-Before accounting for eating, the baseline running time over distance $d$ is
-\[
-R_i^{\text{base}}(d)=\frac{d}{v_i}(1+k_i d).
-\]
-
-The factor $(1+k_i d)$ models fatigue with distance.
-
-After including the post-eating penalty, the deterministic running time becomes
-\[
-R_i(d,n)=R_i^{\text{base}}(d)\,M_i(n)
-=\frac{d}{v_i}(1+k_i d)(1+c_i n+q_i n^2).
-\]
-
-\subsection*{Total Deterministic Time}
-
-The deterministic total race time for athlete $i$ is
-\[
-T_i(d,n)=E_i(n)+R_i(d,n).
-\]
-
-For this project, the deterministic comparison is based on the difference
-\[
-\Delta(d,n)=T_C(d,n)-T_B(d,n),
-\]
-where $C$ denotes Chestnut and $B$ denotes Bolt.
-
-The sign of $\Delta(d,n)$ determines the winner:
+where:
 \begin{itemize}
-    \item $\Delta(d,n)<0$: Chestnut is faster,
-    \item $\Delta(d,n)>0$: Bolt is faster,
-    \item $\Delta(d,n)=0$: deterministic tie.
+    \item $c_i$ is a linear post-eating penalty,
+    \item $q_i$ is a quadratic post-eating penalty.
 \end{itemize}
 
-\subsection*{Expanded Deterministic Formula}
+This is a simple way to capture the idea that running becomes harder after heavier eating.
 
-Expanding the total-time difference gives
+\subsection*{Running Time: Two-Regime Model}
+
+The current project does \emph{not} use a single running curve for all distances.
+Instead, it uses a sprint regime up to a threshold distance $d_s$ and an endurance regime beyond that threshold.
+
+\paragraph{Why the old single-curve idea was not enough.}
+A single Riegel-style power law can fit middle and long distances reasonably well, but it is too rigid for sprint specialists. If one exponent must explain both 100m and 5000m, then an athlete who is exceptional at short sprints tends to become unrealistically dominant at longer distances too. The current model separates these effects.
+
+\paragraph{Endurance regime.}
+For $d > d_s$, athlete $i$ uses a Riegel-style law
 \[
-\Delta(d,n)=\bigl(E_C(n)-E_B(n)\bigr)
-+ d\left(\frac{M_C(n)}{v_C}-\frac{M_B(n)}{v_B}\right)
-+ d^2\left(\frac{k_C M_C(n)}{v_C}-\frac{k_B M_B(n)}{v_B}\right).
+R_i^{\text{long}}(d) = T_{i,\mathrm{ref}} \left(\frac{d}{d_{\mathrm{ref}}}\right)^{k_i},
 \]
-
-This equation is useful because it separates the race into three effects:
-\begin{enumerate}
-    \item \textbf{Eating advantage:}
-    \[
-    E_C(n)-E_B(n).
-    \]
-    This measures who is faster at eating $n$ hot dogs.
-
-    \item \textbf{Linear running effect in distance:}
-    \[
-    d\left(\frac{M_C(n)}{v_C}-\frac{M_B(n)}{v_B}\right).
-    \]
-    This captures how the baseline running-speed difference interacts with the post-eating penalty.
-
-    \item \textbf{Quadratic fatigue effect in distance:}
-    \[
-    d^2\left(\frac{k_C M_C(n)}{v_C}-\frac{k_B M_B(n)}{v_B}\right).
-    \]
-    This captures the extra long-distance fatigue effect, which becomes more important at large $d$.
-\end{enumerate}
-
-This decomposition explains why the winner can change across the $(d,n)$ plane. One athlete may have an advantage in eating, while the other may recover that advantage through running speed or long-distance fatigue behavior.
-
-\section*{Probabilistic Model}
-
-The probabilistic model keeps the same overall structure, but now total race time is random rather than fixed. In the code, randomness is introduced through:
+where:
 \begin{itemize}
-    \item eating-time noise,
-    \item running-speed noise,
-    \item fatigue noise,
-    \item post-eating penalty noise.
+    \item $T_{i,\mathrm{ref}}$ is the runner's time at the endurance reference distance,
+    \item $d_{\mathrm{ref}}$ is the endurance reference distance,
+    \item $k_i$ is the endurance exponent.
 \end{itemize}
 
-So instead of deterministic total times $T_C(d,n)$ and $T_B(d,n)$, we consider random total times, which by abuse of notation we still write as $T_C(d,n)$ and $T_B(d,n)$.
-
-The main object of interest is
-\[
-p(d,n)=\Pr\bigl(T_C(d,n)<T_B(d,n)\bigr).
-\]
-
-This is the probability that Chestnut beats Bolt at the point $(d,n)$.
-
-\subsection*{Interpretation of $p(d,n)$}
-
+Interpretation:
 \begin{itemize}
-    \item If $p(d,n)>0.5$, then Chestnut is more likely to win.
-    \item If $p(d,n)<0.5$, then Bolt is more likely to win.
-    \item If $p(d,n)=0.5$, then both athletes are equally likely to win.
+    \item lower $T_{i,\mathrm{ref}}$ means a faster runner around the reference distance,
+    \item lower $k_i$ means better endurance,
+    \item larger $k_i$ means the runner slows down faster as distance increases.
 \end{itemize}
 
-In the code, this probability is estimated by Monte Carlo simulation:
+\paragraph{Sprint regime.}
+For $d \leq d_s$, athlete $i$ uses a sprint-oriented power law
+\[
+R_i^{\text{short}}(d) = T_{i,\mathrm{sprint}} \left(\frac{d}{d_{\mathrm{sprint}}}\right)^{\alpha_i},
+\]
+where:
 \begin{itemize}
-    \item sample many race times for Chestnut,
-    \item sample many race times for Bolt,
-    \item count the fraction of samples in which Chestnut's time is smaller.
+    \item $T_{i,\mathrm{sprint}}$ is the athlete's sprint reference time,
+    \item $d_{\mathrm{sprint}}$ is the sprint reference distance,
+    \item $\alpha_i$ is chosen so that the short and long regimes match exactly at $d_s$.
 \end{itemize}
 
-\section*{What the Two Boundaries Mean}
-
-There are two different boundaries in the project:
-
-\subsection*{Deterministic Boundary}
-
-The deterministic boundary is defined by
+The continuity condition is
 \[
-\Delta(d,n)=0.
+R_i^{\text{short}}(d_s) = R_i^{\text{long}}(d_s),
+\]
+which gives
+\[
+\alpha_i
+=
+\frac{
+\log\!\left(R_i^{\text{long}}(d_s) / T_{i,\mathrm{sprint}}\right)
+}{
+\log\!\left(d_s / d_{\mathrm{sprint}}\right)
+}.
 \]
 
-This is the set of points where the athletes have the same \emph{mean-model} race time.
+This means:
+\begin{itemize}
+    \item \textbf{sprint ability} is primarily controlled by $T_{i,\mathrm{sprint}}$,
+    \item \textbf{endurance ability} is primarily controlled by $T_{i,\mathrm{ref}}$ and $k_i$,
+    \item the transition at $d_s$ is continuous by construction.
+\end{itemize}
 
-\subsection*{Probabilistic Boundary}
-
-The probabilistic boundary is defined by
+\paragraph{Full running model.}
+The mean running time used by the simulator is
 \[
-p(d,n)=0.5.
+R_i(d,n) =
+\begin{cases}
+R_i^{\text{short}}(d) \, M_i(n), & d \leq d_s, \\
+R_i^{\text{long}}(d) \, M_i(n), & d > d_s.
+\end{cases}
 \]
 
-This is the set of points where the athletes are equally likely to win once randomness is included.
+\subsection*{Total Mean Race Time}
 
-\medskip
-
-These boundaries do not have to coincide. Two athletes can have the same mean time but different variances, or one athlete can have a slightly worse mean but still win often because of the shape of the distribution.
-
-\section*{Why Non-Monotonic Behavior Can Appear}
-
-It is tempting to expect that if the number of hot dogs is fixed, then increasing the distance should move the outcome in only one direction. However, the deterministic difference
+The full deterministic race time is
 \[
-\Delta(d,n)=A(n)+B(n)d+C(n)d^2
-\]
-is generally a quadratic function of $d$, where
-\[
-A(n)=E_C(n)-E_B(n),
-\]
-\[
-B(n)=\frac{M_C(n)}{v_C}-\frac{M_B(n)}{v_B},
-\]
-\[
-C(n)=\frac{k_C M_C(n)}{v_C}-\frac{k_B M_B(n)}{v_B}.
+T_i(d,n) = E_i(n) + R_i(d,n).
 \]
 
-Since a quadratic need not be monotone, the deterministic tie boundary is not guaranteed to be monotone either.
+The deterministic comparison between athletes $A$ and $B$ is
+\[
+\Delta(d,n) = T_A(d,n) - T_B(d,n).
+\]
 
-The same is true, a fortiori, for the probabilistic boundary, because it depends on full random race-time distributions rather than only on mean values.
+Interpretation:
+\begin{itemize}
+    \item $\Delta(d,n) < 0$: athlete $A$ is faster on mean time,
+    \item $\Delta(d,n) > 0$: athlete $B$ is faster on mean time,
+    \item $\Delta(d,n) = 0$: deterministic tie.
+\end{itemize}
+
+\subsection*{Probabilistic Model}
+
+The Monte Carlo layer samples noise around the mean model:
+\begin{itemize}
+    \item additive eating noise,
+    \item multiplicative sprint-reference-time noise,
+    \item multiplicative endurance-reference-time noise,
+    \item multiplicative endurance-exponent noise,
+    \item multiplicative post-eating-penalty noise.
+\end{itemize}
+
+This produces random total race times $\widetilde{T}_A(d,n)$ and $\widetilde{T}_B(d,n)$.
+The estimated win probability is
+\[
+p(d,n) = \Pr\!\bigl(\widetilde{T}_A(d,n) < \widetilde{T}_B(d,n)\bigr).
+\]
+
+\section*{Configuration Guide}
+
+The configuration file is \texttt{config/config.toml}. It has three main sections:
+\begin{itemize}
+    \item \texttt{[simulation]}
+    \item \texttt{[running\_model]}
+    \item \texttt{[running\_model.runners.<name>]}
+\end{itemize}
+
+\subsection*{Simulation Attributes}
+
+\begin{description}
+    \item[\texttt{athlete\_a}, \texttt{athlete\_b}] The two named athletes compared in the plots and reference outputs.
+    \item[\texttt{min\_distance\_m}, \texttt{max\_distance\_m}] The distance range used for the phase diagrams.
+    \item[\texttt{distance\_samples}] Number of distance grid points between the minimum and maximum.
+    \item[\texttt{max\_hotdogs}] Largest hot-dog count shown on the grid.
+    \item[\texttt{monte\_carlo\_samples}] Number of Monte Carlo samples per grid cell for the probabilistic plot.
+    \item[\texttt{random\_seed}] Seed used for reproducible simulations.
+    \item[\texttt{[[simulation.reference\_checks]]}] A small list of named scenarios printed after the plots as quick sanity checks.
+\end{description}
+
+\paragraph{Current choices.}
+The project currently studies distances from 100m to 5000m, uses 120 distance samples, and considers 0 to 20 hot dogs. This range matches the intended scope of the running model: short sprint through 5k, not 10k or marathon modeling.
+
+\subsection*{Global Running-Model Attributes}
+
+\begin{description}
+    \item[\texttt{sprint\_threshold\_distance}] The regime switch distance $d_s$.
+    \item[\texttt{sprint\_reference\_distance}] The short-distance anchor $d_{\mathrm{sprint}}$ used with \texttt{sprint\_ref\_time}.
+    \item[\texttt{reference\_distance}] The endurance reference distance $d_{\mathrm{ref}}$ used with \texttt{ref\_time}.
+    \item[\texttt{max\_modeled\_distance}] Hard upper bound for the supported running model.
+\end{description}
+
+\paragraph{Current choices.}
+\begin{itemize}
+    \item \texttt{sprint\_threshold\_distance = 400.0}: 400m is a natural cutoff between pure sprint behavior and distances where endurance matters more.
+    \item \texttt{sprint\_reference\_distance = 100.0}: 100m is the cleanest sprint reference because it directly represents raw short-distance speed.
+    \item \texttt{reference\_distance = 1500.0}: 1500m is a good middle anchor for a model intended to cover roughly 400m--5000m.
+    \item \texttt{max\_modeled\_distance = 5000.0}: the current toy model is intentionally limited to this range.
+\end{itemize}
+
+\subsection*{Runner-Type Endurance Categories}
+
+The table \texttt{[running\_model.runner\_types]} defines reusable endurance exponents.
+These categories describe endurance quality only. They do \emph{not} describe sprint speed.
+
+\begin{center}
+\begin{tabular}{|l|c|p{8cm}|}
+\hline
+\textbf{Category} & \textbf{$k$} & \textbf{Interpretation} \\
+\hline
+\texttt{elite} & 1.05 & Strong endurance. Performance degrades relatively slowly with distance. \\
+\hline
+\texttt{high} & 1.06 & Better than average endurance. Close to the classic Riegel ballpark for trained runners. \\
+\hline
+\texttt{average} & 1.07 & Middle-of-the-road endurance for this toy model. \\
+\hline
+\texttt{low} & 1.09 & Noticeably weak endurance. Times grow faster with distance. \\
+\hline
+\texttt{bad} & 1.11 & Poor endurance. Useful for athletes whose short-distance strength should fade rapidly as distance grows. \\
+\hline
+\end{tabular}
+\end{center}
+
+\paragraph{Why these values were chosen.}
+The Riegel exponent is often near 1.06 for reasonably trained distance performance, so the current categories are centered near that value. The range 1.05 to 1.11 is broad enough to create visible separation between endurance profiles without making the toy model numerically unstable.
+
+\subsection*{Per-Runner Attributes}
+
+Each runner entry combines the running model with the eating model.
+
+\begin{description}
+    \item[\texttt{sprint\_ref\_time}] Sprint reference time at \texttt{sprint\_reference\_distance}. Lower means faster sprint ability.
+    \item[\texttt{ref\_time}] Endurance reference time at \texttt{reference\_distance}. Lower means faster around 1500m.
+    \item[\texttt{type}] Which endurance category to use from \texttt{runner\_types}.
+    \item[\texttt{eat\_base\_sec}] Base seconds for eating each hot dog.
+    \item[\texttt{eat\_slowdown\_sec}] Extra eating delay added per hot dog eaten.
+    \item[\texttt{post\_eat\_linear}] Linear increase in the running penalty after eating.
+    \item[\texttt{post\_eat\_quadratic}] Quadratic increase in the running penalty after eating.
+    \item[\texttt{eat\_noise\_sec}] Standard deviation of per-hot-dog eating noise.
+    \item[\texttt{run\_sprint\_ref\_time\_rel\_std}] Relative noise scale on sprint reference time.
+    \item[\texttt{run\_ref\_time\_rel\_std}] Relative noise scale on endurance reference time.
+    \item[\texttt{run\_endurance\_rel\_std}] Relative noise scale on the endurance exponent.
+    \item[\texttt{post\_eat\_rel\_std}] Relative noise scale on the post-eating running multiplier.
+\end{description}
+
+\section*{Current Configured Athletes}
+
+\begin{center}
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Runner} & \textbf{Sprint Ref} & \textbf{1500m Ref} & \textbf{Type (long distance)} & \textbf{$k$} \\
+\hline
+Chestnut & 15.6s at 100m & 390.0s & average & 1.07 \\
+\hline
+Bolt & 9.7s at 100m & 245.0s & high & 1.06 \\
+\hline
+\end{tabular}
+\end{center}
+
+\paragraph{Interpretation of the current values.}
+\begin{itemize}
+    \item Chestnut is configured as a slower runner but a much stronger eater.
+    \item Bolt is configured as a much faster runner, both at sprint distance and around 1500m, but a weaker eater with stronger post-eating penalties.
+    \item In the current TOML, Bolt uses the \texttt{high} endurance category. If the goal is a more sprint-specialist version of Bolt, his \texttt{type} can be moved to \texttt{low} or \texttt{bad} without any code change.
+\end{itemize}
+
+\section*{How to Read the Outputs}
+
+\begin{itemize}
+    \item The \textbf{probability plot} shows where athlete A wins often, rarely, or about half the time.
+    \item The \textbf{deterministic plot} shows where the mean model favors one athlete over the other.
+    \item The \textbf{tie curve} on the deterministic plot marks where the mean total times are equal.
+    \item The printed \textbf{reference probabilities} are just spot checks from the config file.
+\end{itemize}
+
+\section*{Example Figure}
+
+Figure~1 shows a probabilistic phase diagram for Chestnut versus Bolt. The horizontal axis is the number of hot dogs eaten before the run, the vertical axis is the running distance, and the color gives $P(\text{Chestnut wins})$ under the Monte Carlo model.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figures/probabilistic_phase_diagram}
+    \caption{Probabilistic phase diagram for Chestnut versus Bolt. Yellow regions favor Chestnut, dark purple regions favor Bolt, and the curve marks the approximate 50-50 boundary.}
+\end{figure}
+
+The plot matches the intended story of the model. For short distances with enough hot dogs, Chestnut's eating advantage can outweigh Bolt's running advantage, so the lower part of the chart becomes bright. For longer distances, Bolt's stronger running parameters dominate, so the upper region stays dark unless the eating burden becomes very large. The boundary curve therefore slopes upward: as distance increases, Chestnut needs Bolt to be penalized by more hot dogs before the matchup becomes competitive.
 
 \section*{Summary}
 
-The project studies a two-parameter race model in the variables $(d,n)$:
+The current project is a configurable toy simulator for ``eat first, then run'' matchups.
+Its main modeling choices are:
 \begin{itemize}
-    \item the deterministic model compares mean total times through $\Delta(d,n)$,
-    \item the probabilistic model compares win likelihood through $p(d,n)$.
+    \item a linear-plus-slowdown eating model,
+    \item a multiplicative post-eating running penalty,
+    \item a two-regime running model with a sprint segment up to 400m and a Riegel endurance segment beyond 400m,
+    \item Monte Carlo noise around both eating and running parameters.
 \end{itemize}
 
-The deterministic formula
-\[
-\Delta(d,n)=\bigl(E_C(n)-E_B(n)\bigr)
-+ d\left(\frac{M_C(n)}{v_C}-\frac{M_B(n)}{v_B}\right)
-+ d^2\left(\frac{k_C M_C(n)}{v_C}-\frac{k_B M_B(n)}{v_B}\right)
-\]
-shows how eating, running speed, and fatigue interact.
-
-The probabilistic quantity
-\[
-p(d,n)=\Pr\bigl(T_C(d,n)<T_B(d,n)\bigr)
-\]
-is the stochastic analogue: it measures how often Chestnut wins once randomness is added to the race.
+The TOML file controls all of the meaningful athlete behavior. Sprint strength is set by \texttt{sprint\_ref\_time}; endurance is set by \texttt{ref\_time} and \texttt{type}/$k$; eating strength is set by the eating and post-eating parameters.
 
 \end{document}

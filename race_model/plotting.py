@@ -52,7 +52,7 @@ def plot_probability_phase_diagram(
     ax.contour(X, Y, probabilities, levels=[0.5], linewidths=2)
 
     ax.set_xlim(hotdog_counts.min() - 0.5, hotdog_counts.max() + 0.5)
-    ax.set_ylim(distances_m.min(), distances_m.max())
+    ax.set_ylim(0.0, distances_m.max())
     ax.set_xticks(hotdog_counts)
 
     ax.set_xlabel("Number of Hot Dogs")
@@ -96,7 +96,7 @@ def plot_deterministic_phase_diagram(
     )
     colorbar = mesh.colorbar
     if colorbar is not None:
-        colorbar.ax.set_yticklabels([athlete_a_name, athlete_b_name])
+        colorbar.ax.set_yticklabels([athlete_b_name, athlete_a_name])
 
     boundary_x = []
     boundary_y = []
@@ -109,7 +109,7 @@ def plot_deterministic_phase_diagram(
         ax.plot(boundary_x, boundary_y, linewidth=2)
 
     ax.set_xlim(hotdog_counts.min() - 0.5, hotdog_counts.max() + 0.5)
-    ax.set_ylim(distances_m.min(), distances_m.max())
+    ax.set_ylim(0.0, distances_m.max())
     ax.set_xticks(hotdog_counts)
 
     ax.set_xlabel("Number of Hot Dogs")
